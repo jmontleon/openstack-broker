@@ -18,6 +18,7 @@ package adapters
 
 import (
 	"github.com/automationbroker/bundle-lib/apb"
+	"github.com/automationbroker/bundle-lib/registries/adapters"
 	log "github.com/sirupsen/logrus"
 	yaml "gopkg.in/yaml.v1"
 )
@@ -55,7 +56,8 @@ plans:
 
 // OpenstackAdapter - Docker Hub Adapter
 type OpenstackAdapter struct {
-	Name string
+	Config adapters.Configuration
+	Name   string
 }
 
 // RegistryName - Retrieve the registry name
@@ -74,6 +76,7 @@ func (r OpenstackAdapter) GetImageNames() ([]string, error) {
 func (r OpenstackAdapter) FetchSpecs(imageNames []string) ([]*apb.Spec, error) {
 	specs := []*apb.Spec{}
 	log.Warningf("Entered FetchSpecs, %v", imageNames)
+	log.Warningf("Test URL, %v", r.Config.URL)
 	for _, imageName := range imageNames {
 		spec, err := r.loadSpec(imageName)
 		if err != nil {

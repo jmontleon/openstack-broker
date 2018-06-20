@@ -247,6 +247,7 @@ objects:
           url: ${OPENSTACK_URL}
           user: ${OPENSTACK_USER}
           pass: ${OPENSTACK_USER}
+          runner: ${OPENSTACK_RUNNER}
           white_list:
             - ".$"
 
@@ -430,6 +431,11 @@ parameters:
   displayname: Openstack user name
   name: OPENSTACK_USER
   value: ""
+
+- description: Openstack runner APB
+  displayname: Openstack runner APB
+  name: OPENSTACK_RUNNER
+  value: "jmontleon/openstack-runner:latest"
 
 ############################################################
 # NOTE: Default behavior for these are going to use the kubernetes

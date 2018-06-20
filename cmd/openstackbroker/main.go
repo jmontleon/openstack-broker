@@ -18,9 +18,11 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 
 	"github.com/automationbroker/bundle-lib/registries"
+	bundleadapters "github.com/automationbroker/bundle-lib/registries/adapters"
 	"github.com/automationbroker/config"
 	flags "github.com/jessevdk/go-flags"
 	"github.com/openshift/ansible-service-broker/pkg/app"
@@ -36,7 +38,6 @@ func main() {
 
 	// To add your custom registries, define an entry in this array.
 	regs := []registries.Registry{}
-	oadapter := adapters.OpenstackAdapter{Name: "openstack"}
 
 	brokerconfig, err := config.CreateConfig("/etc/openstackbroker/config.yaml")
 	if err != nil {
@@ -46,24 +47,30 @@ func main() {
 	}
 
 	for _, config := range brokerconfig.GetSubConfigArray("registry") {
-		c := registries.Config{
-			URL:        config.GetString("url"),
-			User:       config.GetString("user"),
-			Pass:       config.GetString("pass"),
-			Org:        config.GetString("org"),
-			Tag:        config.GetString("tag"),
-			Type:       config.GetString("type"),
-			Name:       config.GetString("name"),
-			Images:     config.GetSliceOfStrings("images"),
-			Namespaces: config.GetSliceOfStrings("namespaces"),
-			Fail:       config.GetBool("fail_on_error"),
-			WhiteList:  config.GetSliceOfStrings("white_list"),
-			BlackList:  config.GetSliceOfStrings("black_list"),
-			AuthType:   config.GetString("auth_type"),
-			AuthName:   config.GetString("auth_name"),
-			Runner:     config.GetString("runner"),
+		rc := registries.Config{
+			URL:    config.GetString("url"),
+			User:   config.GetString("user"),
+			Pass:   config.GetString("pass"),
+			Type:   config.GetString("type"),
+			Name:   config.GetString("name"),
+			Runner: config.GetString("runner"),
 		}
-		reg, err := registries.NewCustomRegistry(c, oadapter, "openstack")
+
+		u, err := url.Parse(config.GetString("url"))
+		if err != nil {
+			log.Errorf("url is not valid: %v", config.GetString("url"))
+			// Default url, allow the registry to fail gracefully or un gracefully.
+			u = &url.URL{}
+		}
+		ac := bundleadapters.Configuration{
+			URL:    u,
+			User:   config.GetString("user"),
+			Pass:   config.GetString("pass"),
+			Runner: config.GetString("runner"),
+		}
+
+		oadapter := adapters.OpenstackAdapter{Name: "openstack", Config: ac}
+		reg, err := registries.NewCustomRegistry(rc, oadapter, "openstack")
 		if err != nil {
 			log.Errorf(
 				"Failed to initialize %v Registry err - %v \n", config.GetString("name"), err)
