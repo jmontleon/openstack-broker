@@ -1,0 +1,433 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: openstackbroker
+objects:
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: openstackbroker
+    labels:
+      app: openstackbroker
+      service: openstackbroker
+    annotations:
+      service.alpha.openshift.io/serving-cert-secret-name: openstackbroker-tls
+  spec:
+    ports:
+      - name: port-1338
+        port: 1338
+        targetPort: 1338
+        protocol: TCP
+    selector:
+      app: openstackbroker
+      service: openstackbroker
+
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: openstackbroker
+    namespace: "openstackbroker"
+
+- apiVersion: rbac.authorization.k8s.io/v1beta1
+  kind: ClusterRoleBinding
+  metadata:
+    name: openstackbroker
+  roleRef:
+    name: admin
+    kind: ClusterRole
+    apiGroup: rbac.authorization.k8s.io
+  subjects:
+  - kind: ServiceAccount
+    name: openstackbroker
+    namespace: "openstackbroker"
+
+- apiVersion: rbac.authorization.k8s.io/v1beta1
+  kind: ClusterRole
+  metadata:
+    name: sb-auth
+  rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "delete"]
+  - apiGroups: ["authorization.openshift.io"]
+    resources: ["subjectrulesreview"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["image.openshift.io", ""]
+    attributeRestrictions: null
+    resources: ["images"]
+    verbs: ["get", "list"]
+  - apiGroups: ["network.openshift.io", ""]
+    attributeRestrictions: null
+    resources: ["clusternetworks", "netnamespaces"]
+    verbs: ["get"]
+  - apiGroups: ["network.openshift.io", ""]
+    attributeRestrictions: null
+    resources: ["netnamespaces"]
+    verbs: ["update"]
+  - apiGroups: ["networking.k8s.io", ""]
+    attributeRestrictions: null
+    resources: ["networkpolicies"]
+    verbs: ["create", "delete"]
+  - apiGroups: ["automationbroker.io"]
+    attributeRestrictions: null
+    resources: ["bundles", "bundlebindings", "bundleinstances"]
+    verbs: ["*"]
+
+- apiVersion: rbac.authorization.k8s.io/v1beta1
+  kind: ClusterRoleBinding
+  metadata:
+    name: sb-auth-bind
+  subjects:
+  - kind: ServiceAccount
+    name: openstackbroker
+    namespace: "openstackbroker"
+  roleRef:
+    kind: ClusterRole
+    name: sb-auth
+    apiGroup: rbac.authorization.k8s.io
+
+- apiVersion: rbac.authorization.k8s.io/v1beta1
+  kind: ClusterRole
+  metadata:
+    name: access-asb-role
+  rules:
+  - nonResourceURLs: ["${BROKER_URL_PREFIX}", "${BROKER_URL_PREFIX}/*"]
+    verbs: ["get", "post", "put", "patch", "delete"]
+
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    name: openstackbroker
+    labels:
+      app: openstackbroker
+      service: openstackbroker
+  spec:
+    replicas: 1
+    selector:
+      app: openstackbroker
+    strategy:
+      type: Rolling
+    template:
+      metadata:
+        labels:
+          app: openstackbroker
+          service: openstackbroker
+      spec:
+        serviceAccount: openstackbroker
+        containers:
+        - image: jmontleon/openstackbroker:demo
+          name: openstackbroker
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/ansible-service-broker
+            - name: openstackbroker-tls
+              mountPath: /etc/tls/private
+            - name: sb-auth-volume
+              mountPath: /var/run/asb-auth
+          ports:
+            - containerPort: 1338
+              protocol: TCP
+          env:
+          - name: BROKER_CONFIG
+            value: ${BROKER_CONFIG}
+          resources: {}
+          terminationMessagePath: /tmp/termination-log
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 1338
+              scheme: HTTPS
+            initialDelaySeconds: 15
+            timeoutSeconds: 1
+          livenessProbe:
+            httpGet:
+              port: 1338
+              path: /healthz
+              scheme: HTTPS
+            initialDelaySeconds: 15
+            timeoutSeconds: 1
+        volumes:
+          - name: config-volume
+            configMap:
+              name: broker-config
+              items:
+              - key: broker-config
+                path: config.yaml
+          - name: openstackbroker-tls
+            secret:
+              secretName: openstackbroker-tls
+          - name: sb-auth-volume
+            secret:
+              secretName: broker-auth-secret
+
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    name: broker-auth-secret
+    namespace: "openstackbroker"
+  data:
+    username: ${BROKER_USER}
+    password: ${BROKER_PASS}
+
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    name: ${REGISTRY_SECRET_NAME}
+    namespace: "openstackbroker"
+  data:
+    username: ${OPENSTACK_USER}
+    password: ${OPENSTACK_PASS}
+
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: broker-config
+    namespace: "openstackbroker"
+    labels:
+      app: openstackbroker
+  data:
+    broker-config: |
+      registry:
+        - type: "openstack"
+          name: "openstack"
+          url: ${OPENSTACK_URL}
+          user: ${OPENSTACK_USER} 
+          pass: ${OPENSTACK_USER}
+          white_list:
+            - ".$"
+      dao:
+        type: "crd"
+      log:
+        logfile: /var/log/ansible-service-broker/asb.log
+        stdout: true
+        level: debug
+        color: true
+      openshift:
+        host: "${CLUSTER_AUTH_HOST}"
+        ca_file: "${CA_FILE}"
+        bearer_token_file: ""
+        image_pull_policy: "IfNotPresent"
+        sandbox_role: "edit"
+        namespace: "openstackbroker"
+        keep_namespace: false
+        keep_namespace_on_error: true
+      broker:
+        dev_broker: false
+        bootstrap_on_startup: true
+        refresh_interval: "600s"
+        launch_apb_on_bind: true
+        output_request: true
+        recovery: true
+        ssl_cert_key: /etc/tls/private/tls.key
+        ssl_cert: /etc/tls/private/tls.crt
+        auto_escalate: true
+        cluster_url: openstackbroker
+        auth:
+          - type: basic
+            enabled: ${ENABLE_BASIC_AUTH}
+
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: openstackbroker-client
+    namespace: "openstackbroker"
+
+- apiVersion: rbac.authorization.k8s.io/v1beta1
+  kind: ClusterRoleBinding
+  metadata:
+    name: openstackbroker-client
+  subjects:
+  - kind: ServiceAccount
+    name: openstackbroker-client
+    namespace: "openstackbroker"
+  roleRef:
+    kind: ClusterRole
+    name: access-asb-role
+    apiGroup: rbac.authorization.k8s.io
+
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    name: openstackbroker-client
+    annotations:
+      kubernetes.io/service-account.name: openstackbroker-client
+  type: kubernetes.io/service-account-token
+
+- apiVersion: v1
+  kind: Route
+  metadata:
+    name: openstackbroker-1338
+    labels:
+      app: openstackbroker
+      service: openstackbroker
+  spec:
+    to:
+      kind: Service
+      name: openstackbroker
+    port:
+      targetPort: port-1338
+    tls:
+      termination: reencrypt
+
+- apiVersion: servicecatalog.k8s.io/v1beta1
+  kind: ClusterServiceBroker
+  metadata:
+    name: openstackbroker
+  spec:
+    url: https://openstackbroker.openstackbroker.svc:1338${BROKER_URL_PREFIX}/
+    authInfo:
+      basic:
+        secretRef:
+          namespace: openstackbroker
+          name: broker-auth-secret
+    insecureSkipTLSVerify: true
+    #caBundle: ${BROKER_CA_CERT}
+
+# CRDs for the broker.
+- apiVersion: apiextensions.k8s.io/v1beta1
+  kind: CustomResourceDefinition
+  metadata:
+    name: bundles.automationbroker.io
+  spec:
+    group: automationbroker.io
+    version: v1alpha1
+    scope: Namespaced
+    names:
+      plural: bundles
+      singular: bundle
+      kind: Bundle
+- apiVersion: apiextensions.k8s.io/v1beta1
+  kind: CustomResourceDefinition
+  metadata:
+    name: bundlebindings.automationbroker.io
+  spec:
+    group: automationbroker.io
+    version: v1alpha1
+    scope: Namespaced
+    names:
+      plural: bundlebindings
+      singular: bundlebinding
+      kind: BundleBinding
+
+- apiVersion: apiextensions.k8s.io/v1beta1
+  kind: CustomResourceDefinition
+  metadata:
+    name: bundleinstances.automationbroker.io
+  spec:
+    group: automationbroker.io
+    version: v1alpha1
+    scope: Namespaced
+    names:
+      plural: bundleinstances
+      singular: bundleinstance
+      kind: BundleInstance
+parameters:
+- description: Service Broker CA Cert.
+  displayname: Service Broker kind.
+  name: BROKER_CA_CERT
+  value: ""
+
+- description: Service Broker url prefix for the cluster
+  displayname: ASB Url Prefix
+  name: BROKER_URL_PREFIX
+  value: "/openstackbroker"
+
+- description: Suffix for OpenShift routes
+  displayname: Suffix for OpenShift routes
+  name: ROUTING_SUFFIX
+  value: "172.17.0.1.nip.io"
+
+- description: Configuration filepath for Ansible Service Broker
+  displayname: Ansible Service Broker Configuration File
+  name: BROKER_CONFIG
+  value: /etc/ansible-service-broker/config.yaml
+
+- description: OpenShift User Password
+  displayname: OpenShift User Password
+  name: OPENSHIFT_PASS
+  value: admin
+
+- description: OpenShift User Name
+  displayname: OpenShift User Name
+  name: OPENSHIFT_USER
+  value: admin
+
+- description: OpenShift Target URL
+  displayname: OpenShift Target URL
+  name: OPENSHIFT_TARGET
+  value: kubernetes.default
+
+- description: Registry Secret Name
+  displayname: Registry Secret Name
+  name: REGISTRY_SECRET_NAME
+  value: registry-auth-secret
+
+- description: Registry Auth Type
+  displayname: Registry Auth Type
+  name: REGISTRY_AUTH_TYPE
+  value: secret
+
+- description: APB ImagePullPolicy
+  displayname: APB ImagePullPolicy
+  name: IMAGE_PULL_POLICY
+  value: "IfNotPresent"
+
+- description: Will enable basic authentication
+  displayname: Enable basic authentication
+  name: ENABLE_BASIC_AUTH
+  value: "true"
+
+############################################################
+# NOTE: These values MUST be base64 encoded.
+# http://red.ht/2wbrCYo states "The value associated with
+# keys in the data map must be base64 encoded."
+############################################################
+- description: Broker user password
+  displayname: Broker user password
+  name: BROKER_PASS
+  value: YWRtaW4=
+
+- description: Broker user name
+  displayname: Broker user name
+  name: BROKER_USER
+  value: YWRtaW4=
+
+- description: Openstack Identity URL
+  displayname: Openstack URL
+  name: OPENSTACK_URL
+  value: ""
+
+- description: Openstack user password
+  displayname: Openstack user password
+  name: OPENSTACK_PASS
+  value: ""
+
+- description: Openstack user name
+  displayname: Openstack user name
+  name: OPENSTACK_USER
+  value: ""
+
+############################################################
+# NOTE: Default behavior for these are going to use the kubernetes
+# InClusterConfig. These are typically overridden for running
+# the broker outside of a cluster. Under normal circumstances,
+# you probably want to leave these blank.
+############################################################
+- description: Service Account CAFile Path
+  displayname: Service Account CAFile Path
+  name: CA_FILE
+  value: ""
+
+- description: Cluster Authentication Host
+  displayname: Cluster Authentication Host
+  name: CLUSTER_AUTH_HOST
+  value: ""
+
+############################################################

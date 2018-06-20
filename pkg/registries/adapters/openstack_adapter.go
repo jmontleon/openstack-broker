@@ -1,0 +1,104 @@
+//
+// Copyright (c) 2018 Red Hat, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+
+package adapters
+
+import (
+	"github.com/automationbroker/bundle-lib/apb"
+	log "github.com/sirupsen/logrus"
+	yaml "gopkg.in/yaml.v1"
+)
+
+const apbyaml = `version: 1.0
+name: hello-world-db-apb
+description: A sample APB which deploys Hello World Database
+bindable: True
+async: optional
+metadata:
+  displayName: Hello World Database (APB)
+  dependencies: ['docker.io/centos/postgresql-94-centos7']
+  providerDisplayName: "Red Hat, Inc."
+plans:
+  - name: default
+    description: A sample APB which deploys Hello World Database
+    free: True
+    metadata:
+      displayName: Default
+      longDescription: This plan deploys a Postgres Database the Hello World application can connect to
+      cost: $0.00
+    parameters:
+      - name: postgresql_database
+        title: PostgreSQL Database Name
+        type: string
+        default: admin
+      - name: postgresql_user
+        title: PostgreSQL User
+        type: string
+        default: admin
+      - name: postgresql_password
+        title: PostgreSQL Password
+        type: string
+        default: admin`
+
+// OpenstackAdapter - Docker Hub Adapter
+type OpenstackAdapter struct {
+	Name string
+}
+
+// RegistryName - Retrieve the registry name
+func (r OpenstackAdapter) RegistryName() string {
+	return r.Name
+}
+
+// GetImageNames - retrieve the images
+func (r OpenstackAdapter) GetImageNames() ([]string, error) {
+	var apbData []string
+	apbData = append(apbData, "hello-world-db-apb")
+	return apbData, nil
+}
+
+// FetchSpecs - retrieve the spec for the image names.
+func (r OpenstackAdapter) FetchSpecs(imageNames []string) ([]*apb.Spec, error) {
+	specs := []*apb.Spec{}
+	log.Warningf("Entered FetchSpecs, %v", imageNames)
+	for _, imageName := range imageNames {
+		spec, err := r.loadSpec(imageName)
+		if err != nil {
+			log.Errorf("Failed to retrieve spec data for image %s - %v", imageName, err)
+		}
+		if spec != nil {
+			specs = append(specs, spec)
+		}
+	}
+	log.Warningf("Leaving FetchSpecs, %v", specs)
+	return specs, nil
+}
+
+func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
+	var spec apb.Spec
+
+	log.Warningf("entered OpenstackAdapter.loadSpec(%s)", imageName)
+	err := yaml.Unmarshal([]byte(apbyaml), &spec)
+	if err != nil {
+		return nil, err
+	}
+
+	// hard code to 2
+	spec.Runtime = 2
+
+	log.Warningf("leaving OpenstackAdapter.loadSpec(%s), returning %v", imageName, spec)
+	return &spec, nil
+}
