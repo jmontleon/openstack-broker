@@ -121,7 +121,7 @@ objects:
       spec:
         serviceAccount: openstackbroker
         containers:
-        - image: jmontleon/openstackbroker:demo
+        - image: jmontleon/openstackbroker:latest
           name: openstackbroker
           imagePullPolicy: IfNotPresent
           volumeMounts:
