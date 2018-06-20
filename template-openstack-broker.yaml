@@ -127,6 +127,8 @@ objects:
           volumeMounts:
             - name: config-volume
               mountPath: /etc/ansible-service-broker
+            - name: openstack-config-volume
+              mountPath: /etc/openstackbroker
             - name: openstackbroker-tls
               mountPath: /etc/tls/private
             - name: sb-auth-volume
@@ -159,6 +161,12 @@ objects:
               name: broker-config
               items:
               - key: broker-config
+                path: config.yaml
+          - name: openstack-config-volume
+            configMap:
+              name: openstackbroker-config
+              items:
+              - key: openstackbroker-config
                 path: config.yaml
           - name: openstackbroker-tls
             secret:
@@ -194,14 +202,6 @@ objects:
       app: openstackbroker
   data:
     broker-config: |
-      registry:
-        - type: "openstack"
-          name: "openstack"
-          url: ${OPENSTACK_URL}
-          user: ${OPENSTACK_USER} 
-          pass: ${OPENSTACK_USER}
-          white_list:
-            - ".$"
       dao:
         type: "crd"
       log:
@@ -232,6 +232,23 @@ objects:
         auth:
           - type: basic
             enabled: ${ENABLE_BASIC_AUTH}
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: openstackbroker-config
+    namespace: "openstackbroker"
+    labels:
+      app: openstackbroker
+  data:
+    openstackbroker-config: |
+      registry:
+        - type: "openstack"
+          name: "openstack"
+          url: ${OPENSTACK_URL}
+          user: ${OPENSTACK_USER}
+          pass: ${OPENSTACK_USER}
+          white_list:
+            - ".$"
 
 - apiVersion: v1
   kind: ServiceAccount
