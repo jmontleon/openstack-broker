@@ -97,7 +97,9 @@ func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
 	var parameters []apb.ParameterDescriptor
 	splitName := strings.Split(imageName, "-")
 	splitlen := len(splitName)
-	displayName := fmt.Sprintf("Openstack %v in %v Project (APB)", splitName[1], splitName[2])
+	service := splitName[1]
+	project := strings.Join(splitName[2:(splitlen-2)], "-")
+	displayName := fmt.Sprintf("Openstack %v in %v Project (APB)", service, project)
 
 	//Configure Plan
 	plan.Name = "default"
@@ -105,7 +107,7 @@ func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
 
 	//Configure APB
 	spec.Runtime = 2
-	spec.Description = fmt.Sprintf("Provisions an Openstack %v instance in the %v Project using a Heat Template", splitName[1], strings.Join(splitName[2:(splitlen-2)], "-"))
+	spec.Description = fmt.Sprintf("Provisions an Openstack %v instance in the %v Project using a Heat Template", service, project)
 	spec.Image = r.Config.Runner
 	spec.FQName = strings.Replace(imageName, "_", "-", -1)
 	spec.Version = "1.0"
