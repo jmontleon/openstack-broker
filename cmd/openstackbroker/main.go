@@ -48,12 +48,14 @@ func main() {
 
 	for _, config := range brokerconfig.GetSubConfigArray("registry") {
 		rc := registries.Config{
-			URL:    config.GetString("url"),
-			User:   config.GetString("user"),
-			Pass:   config.GetString("pass"),
-			Type:   config.GetString("type"),
-			Name:   config.GetString("name"),
-			Runner: config.GetString("runner"),
+			URL:       config.GetString("url"),
+			User:      config.GetString("user"),
+			Pass:      config.GetString("pass"),
+			Type:      config.GetString("type"),
+			Name:      config.GetString("name"),
+			Runner:    config.GetString("runner"),
+			WhiteList: []string{".*"},
+			BlackList: []string{},
 		}
 
 		u, err := url.Parse(config.GetString("url"))
@@ -67,9 +69,10 @@ func main() {
 			User:   config.GetString("user"),
 			Pass:   config.GetString("pass"),
 			Runner: config.GetString("runner"),
+			Org:    config.GetString("project"),
 		}
 
-		oadapter := adapters.OpenstackAdapter{Name: "openstack", Config: ac}
+		oadapter := adapters.OpenstackAdapter{Config: ac}
 		reg, err := registries.NewCustomRegistry(rc, oadapter, "openstack")
 		if err != nil {
 			log.Errorf(

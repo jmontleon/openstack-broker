@@ -126,8 +126,6 @@ objects:
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: config-volume
-              mountPath: /etc/ansible-service-broker
-            - name: openstack-config-volume
               mountPath: /etc/openstackbroker
             - name: openstackbroker-tls
               mountPath: /etc/tls/private
@@ -161,12 +159,6 @@ objects:
               name: broker-config
               items:
               - key: broker-config
-                path: config.yaml
-          - name: openstack-config-volume
-            configMap:
-              name: openstackbroker-config
-              items:
-              - key: openstackbroker-config
                 path: config.yaml
           - name: openstackbroker-tls
             secret:
@@ -202,6 +194,13 @@ objects:
       app: openstackbroker
   data:
     broker-config: |
+      registry:
+        - type: "openstack"
+          name: "openstack"
+          url: ${OPENSTACK_URL}
+          user: ${OPENSTACK_USER}
+          pass: ${OPENSTACK_USER}
+          runner: ${OPENSTACK_RUNNER}
       dao:
         type: "crd"
       log:
@@ -232,24 +231,6 @@ objects:
         auth:
           - type: basic
             enabled: ${ENABLE_BASIC_AUTH}
-- apiVersion: v1
-  kind: ConfigMap
-  metadata:
-    name: openstackbroker-config
-    namespace: "openstackbroker"
-    labels:
-      app: openstackbroker
-  data:
-    openstackbroker-config: |
-      registry:
-        - type: "openstack"
-          name: "openstack"
-          url: ${OPENSTACK_URL}
-          user: ${OPENSTACK_USER}
-          pass: ${OPENSTACK_USER}
-          runner: ${OPENSTACK_RUNNER}
-          white_list:
-            - ".$"
 
 - apiVersion: v1
   kind: ServiceAccount
@@ -365,7 +346,7 @@ parameters:
 - description: Configuration filepath for Ansible Service Broker
   displayname: Ansible Service Broker Configuration File
   name: BROKER_CONFIG
-  value: /etc/ansible-service-broker/config.yaml
+  value: /etc/openstackbroker/config.yaml
 
 - description: OpenShift User Password
   displayname: OpenShift User Password

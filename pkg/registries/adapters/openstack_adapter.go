@@ -17,66 +17,66 @@
 package adapters
 
 import (
+	"bytes"
+	"crypto/tls"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"strings"
+
 	"github.com/automationbroker/bundle-lib/apb"
 	"github.com/automationbroker/bundle-lib/registries/adapters"
 	log "github.com/sirupsen/logrus"
-	yaml "gopkg.in/yaml.v1"
 )
-
-const apbyaml = `version: 1.0
-name: hello-world-db-apb
-description: A sample APB which deploys Hello World Database
-bindable: True
-async: optional
-metadata:
-  displayName: Hello World Database (APB)
-  dependencies: ['docker.io/centos/postgresql-94-centos7']
-  providerDisplayName: "Red Hat, Inc."
-plans:
-  - name: default
-    description: A sample APB which deploys Hello World Database
-    free: True
-    metadata:
-      displayName: Default
-      longDescription: This plan deploys a Postgres Database the Hello World application can connect to
-      cost: $0.00
-    parameters:
-      - name: postgresql_database
-        title: PostgreSQL Database Name
-        type: string
-        default: admin
-      - name: postgresql_user
-        title: PostgreSQL User
-        type: string
-        default: admin
-      - name: postgresql_password
-        title: PostgreSQL Password
-        type: string
-        default: admin`
 
 // OpenstackAdapter - Docker Hub Adapter
 type OpenstackAdapter struct {
 	Config adapters.Configuration
-	Name   string
 }
 
 // RegistryName - Retrieve the registry name
 func (r OpenstackAdapter) RegistryName() string {
-	return r.Name
+	if r.Config.URL.Host == "" {
+		return r.Config.URL.Path
+	}
+	return r.Config.URL.Host
 }
 
 // GetImageNames - retrieve the images
 func (r OpenstackAdapter) GetImageNames() ([]string, error) {
-	var apbData []string
-	apbData = append(apbData, "hello-world-db-apb")
-	return apbData, nil
+	var apbNames []string
+	var projects []string
+	services := []string{"VM"}
+
+	if len(r.Config.Org) == 0 {
+		token, err := r.getUnscopedToken()
+		if err != nil {
+			return apbNames, err
+		}
+		projects, err = r.getProjects(token)
+		if err != nil {
+			return apbNames, err
+		}
+	} else {
+		projects = append(projects, r.Config.Org)
+	}
+
+	for _, project := range projects {
+		for _, service := range services {
+			apbNames = append(apbNames, fmt.Sprintf("openstack-%v-%v-project-apb", service, project))
+		}
+	}
+
+	return apbNames, nil
 }
 
 // FetchSpecs - retrieve the spec for the image names.
 func (r OpenstackAdapter) FetchSpecs(imageNames []string) ([]*apb.Spec, error) {
 	specs := []*apb.Spec{}
 	log.Warningf("Entered FetchSpecs, %v", imageNames)
-	log.Warningf("Test URL, %v", r.Config.URL)
+
 	for _, imageName := range imageNames {
 		spec, err := r.loadSpec(imageName)
 		if err != nil {
@@ -91,17 +91,113 @@ func (r OpenstackAdapter) FetchSpecs(imageNames []string) ([]*apb.Spec, error) {
 }
 
 func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
-	var spec apb.Spec
-
 	log.Warningf("entered OpenstackAdapter.loadSpec(%s)", imageName)
-	err := yaml.Unmarshal([]byte(apbyaml), &spec)
+	var spec apb.Spec
+	var plan apb.Plan
+	var parameters []apb.ParameterDescriptor
+	splitName := strings.Split(imageName, "-")
+	splitlen := len(splitName)
+	displayName := fmt.Sprintf("Openstack %v in %v Project (APB)", splitName[1], splitName[2])
+
+	//Configure Plan
+	plan.Name = "default"
+	plan.Parameters = parameters
+
+	//Configure APB
+	spec.Runtime = 2
+	spec.Description = fmt.Sprintf("Provisions an Openstack %v instance in the %v Project using a Heat Template", splitName[1], strings.Join(splitName[2:(splitlen-2)], "-"))
+	spec.Image = r.Config.Runner
+	spec.FQName = strings.Replace(imageName, "_", "-", -1)
+	spec.Version = "1.0"
+	spec.Bindable = false
+	spec.Async = "optional"
+	spec.Metadata = map[string]interface{}{
+		"displayName":         displayName,
+		"providerDisplayName": "Red Hat, Inc.",
+	}
+	spec.Plans = append(spec.Plans, plan)
+
+	log.Warningf("leaving OpenstackAdapter.loadSpec(%s), returning %v", imageName, spec)
+	return &spec, nil
+}
+
+func (r OpenstackAdapter) getUnscopedToken() (string, error) {
+	authString := fmt.Sprintf("{ \"auth\": { \"identity\": { \"methods\": [\"password\"], \"password\": { \"user\": { \"name\": \"%v\", \"domain\": { \"id\": \"default\" }, \"password\": \"%v\" }}}}}", r.Config.User, r.Config.Pass)
+	authBytes := []byte(authString)
+
+	authUrl := fmt.Sprintf("%v/identity/v3/auth/tokens",
+		r.Config.URL.String())
+
+	response, err := openstackRequest(authUrl, "POST", authBytes, "")
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+
+	return response.Header["X-Subject-Token"][0], nil
+}
+
+func (r OpenstackAdapter) getProjects(token string) ([]string, error) {
+	var projects []string
+
+	type Project struct {
+		Name string `json:"name"`
+	}
+
+	type ProjectResponse struct {
+		Projects []Project `json:"projects"`
+	}
+
+	projectUrl := fmt.Sprintf("%v/identity/v3/auth/projects",
+		r.Config.URL.String())
+	response, err := openstackRequest(projectUrl, "GET", nil, token)
+	if err != nil {
+		return []string{}, err
+	}
+	defer response.Body.Close()
+	projectJson, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return []string{}, err
+	}
+
+	projectResponse := ProjectResponse{}
+	err = json.Unmarshal(projectJson, &projectResponse)
+	if err != nil {
+		return []string{}, err
+	}
+
+	for _, project := range projectResponse.Projects {
+		projects = append(projects, project.Name)
+	}
+
+	return projects, nil
+}
+
+func openstackRequest(requestUrl string, method string, data []byte, token string) (*http.Response, error) {
+	req, err := http.NewRequest(method, requestUrl, bytes.NewBuffer(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if len(token) != 0 {
+		req.Header.Set("X-Auth-Token", token)
+	}
+
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	httpClient := &http.Client{Transport: transport}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 
-	// hard code to 2
-	spec.Runtime = 2
+	if resp.StatusCode != 200 && resp.StatusCode != 201 {
+		return nil, errors.New(resp.Status)
+	}
+	response := resp
 
-	log.Warningf("leaving OpenstackAdapter.loadSpec(%s), returning %v", imageName, spec)
-	return &spec, nil
+	log.Warningf("Request completed successfully")
+	return response, nil
 }
