@@ -36,6 +36,34 @@ type OpenstackAdapter struct {
 	Config adapters.Configuration
 }
 
+type Object struct {
+	Name string `json:"name"`
+}
+
+type ProjectResponse struct {
+	Objects []Object `json:"projects"`
+}
+
+type FlavorResponse struct {
+	Objects []Object `json:"flavors"`
+}
+
+type ImageResponse struct {
+	Objects []Object `json:"images"`
+}
+
+type Keypair struct {
+	Name string `json:"name"`
+}
+
+type KeypairData struct {
+	Keypair Keypair `json:"keypair"`
+}
+
+type KeyResponse struct {
+	Keypairs []KeypairData `json:"keypairs"`
+}
+
 // RegistryName - Retrieve the registry name
 func (r OpenstackAdapter) RegistryName() string {
 	if r.Config.URL.Host == "" {
@@ -48,14 +76,14 @@ func (r OpenstackAdapter) RegistryName() string {
 func (r OpenstackAdapter) GetImageNames() ([]string, error) {
 	var apbNames []string
 	var projects []string
-	services := []string{"VM"}
+	services := []string{"vm"}
 
 	if len(r.Config.Org) == 0 {
 		token, err := r.getUnscopedToken()
 		if err != nil {
 			return apbNames, err
 		}
-		projects, err = r.getProjects(token)
+		projects, err = r.getObjectList(token, "projects", "/identity/v3/auth/projects")
 		if err != nil {
 			return apbNames, err
 		}
@@ -91,7 +119,7 @@ func (r OpenstackAdapter) FetchSpecs(imageNames []string) ([]*apb.Spec, error) {
 }
 
 func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
-	log.Warningf("entered OpenstackAdapter.loadSpec(%s)", imageName)
+	log.Warningf("entered OpenstackAdapter.loadSpec(%v)", imageName)
 	var spec apb.Spec
 	var plan apb.Plan
 	var parameters []apb.ParameterDescriptor
@@ -99,11 +127,121 @@ func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
 	splitlen := len(splitName)
 	service := splitName[1]
 	project := strings.Join(splitName[2:(splitlen-2)], "-")
-	displayName := fmt.Sprintf("Openstack %v in %v Project (APB)", service, project)
+	displayName := fmt.Sprintf("Openstack %v in %v project (APB)", service, project)
 
+	token, err := r.getScopedToken(project)
+	if err != nil {
+		log.Warningf("Could not get a scoped token: %s", err)
+	}
+
+	flavors, err := r.getObjectList(token, "flavors", "/compute/v2/flavors")
+	if err != nil {
+		log.Warningf("Could not retrieve flavors: %s", err)
+	}
+
+	keys, err := r.getObjectList(token, "keys", "/compute/v2/os-keypairs")
+	if err != nil {
+		log.Warningf("Could not retrieve os-keypairs: %s", err)
+	}
+
+	images, err := r.getObjectList(token, "images", "/compute/v2/images")
+	if err != nil {
+		log.Warningf("Could not retrieve images: %s", err)
+	}
+
+	//Configure Parameters
+	flavorParameter := apb.ParameterDescriptor{
+		Name:      "flavor",
+		Title:     "Flavor",
+		Type:      "enum",
+		Updatable: false,
+		Required:  true,
+		Default:   flavors[0],
+		Enum:      flavors,
+	}
+	parameters = append(parameters, flavorParameter)
+
+	keyParameter := apb.ParameterDescriptor{
+		Name:      "key",
+		Title:     "Key",
+		Type:      "enum",
+		Updatable: false,
+		Required:  true,
+		Default:   keys[0],
+		Enum:      keys,
+	}
+	parameters = append(parameters, keyParameter)
+
+	imageParameter := apb.ParameterDescriptor{
+		Name:      "image",
+		Title:     "Image",
+		Type:      "enum",
+		Updatable: false,
+		Required:  true,
+		Default:   images[0],
+		Enum:      images,
+	}
+	parameters = append(parameters, imageParameter)
+
+	urlParameter := apb.ParameterDescriptor{
+		Name:         "url",
+		Title:        "URL",
+		Type:         "string",
+		Updatable:    false,
+		Required:     true,
+		Default:      fmt.Sprintf("%v/identity", r.Config.URL.String()),
+		DisplayGroup: "Openstack Authentication",
+	}
+	parameters = append(parameters, urlParameter)
+
+	userParameter := apb.ParameterDescriptor{
+		Name:         "user",
+		Title:        "User",
+		Type:         "string",
+		Updatable:    false,
+		Required:     true,
+		Default:      r.Config.User,
+		DisplayGroup: "Openstack Authentication",
+	}
+	parameters = append(parameters, userParameter)
+
+	passParameter := apb.ParameterDescriptor{
+		Name:         "pass",
+		Title:        "Password",
+		Type:         "string",
+		Updatable:    false,
+		Required:     true,
+		Default:      r.Config.Pass,
+		DisplayType:  "password",
+		DisplayGroup: "Openstack Authentication",
+	}
+	parameters = append(parameters, passParameter)
+
+	projectParameter := apb.ParameterDescriptor{
+		Name:         "project",
+		Title:        "Project",
+		Type:         "string",
+		Updatable:    false,
+		Required:     true,
+		Default:      project,
+		DisplayGroup: "Openstack Authentication",
+	}
+	parameters = append(parameters, projectParameter)
+
+	serviceParameter := apb.ParameterDescriptor{
+		Name:         "service",
+		Title:        "Service",
+		Type:         "string",
+		Updatable:    false,
+		Required:     true,
+		Default:      service,
+		DisplayGroup: "Openstack Authentication",
+	}
+	parameters = append(parameters, serviceParameter)
 	//Configure Plan
 	plan.Name = "default"
 	plan.Parameters = parameters
+	plan.Description = fmt.Sprintf("Provisions an Openstack %v instance in the %v Project using a Heat Template", service, project)
 
 	//Configure APB
 	spec.Runtime = 2
@@ -139,40 +277,82 @@ func (r OpenstackAdapter) getUnscopedToken() (string, error) {
 	return response.Header["X-Subject-Token"][0], nil
 }
 
-func (r OpenstackAdapter) getProjects(token string) ([]string, error) {
-	var projects []string
+func (r OpenstackAdapter) getScopedToken(project string) (string, error) {
+	authString := fmt.Sprintf("{ \"auth\": { \"identity\": { \"methods\": [\"password\"], \"password\": { \"user\": { \"name\": \"%v\", \"domain\": { \"id\": \"default\" }, \"password\": \"%v\" }}}, \"scope\": { \"project\": { \"name\": \"%v\",\"domain\": { \"id\": \"default\" }}}}}", r.Config.User, r.Config.Pass, project)
+	authBytes := []byte(authString)
 
-	type Project struct {
-		Name string `json:"name"`
-	}
-
-	type ProjectResponse struct {
-		Projects []Project `json:"projects"`
-	}
-
-	projectUrl := fmt.Sprintf("%v/identity/v3/auth/projects",
+	authUrl := fmt.Sprintf("%v/identity/v3/auth/tokens",
 		r.Config.URL.String())
-	response, err := openstackRequest(projectUrl, "GET", nil, token)
+
+	response, err := openstackRequest(authUrl, "POST", authBytes, "")
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+
+	return response.Header["X-Subject-Token"][0], nil
+}
+
+func (r OpenstackAdapter) getObjectList(token string, objectType string, objectPath string) ([]string, error) {
+	var objects []string
+
+	objectUrl := fmt.Sprintf("%v%v", r.Config.URL.String(), objectPath)
+	response, err := openstackRequest(objectUrl, "GET", nil, token)
 	if err != nil {
 		return []string{}, err
 	}
 	defer response.Body.Close()
-	projectJson, err := ioutil.ReadAll(response.Body)
+	objectJson, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		return []string{}, err
 	}
 
-	projectResponse := ProjectResponse{}
-	err = json.Unmarshal(projectJson, &projectResponse)
-	if err != nil {
-		return []string{}, err
+	switch objectType {
+	case "projects":
+		objectResponse := ProjectResponse{}
+		err := json.Unmarshal(objectJson, &objectResponse)
+		if err != nil {
+			return []string{}, err
+		}
+
+		for _, object := range objectResponse.Objects {
+			objects = append(objects, object.Name)
+		}
+	case "images":
+		objectResponse := ImageResponse{}
+		err := json.Unmarshal(objectJson, &objectResponse)
+		if err != nil {
+			return []string{}, err
+		}
+
+		for _, object := range objectResponse.Objects {
+			objects = append(objects, object.Name)
+		}
+	case "keys":
+		objectResponse := KeyResponse{}
+		err := json.Unmarshal(objectJson, &objectResponse)
+		if err != nil {
+			return []string{}, err
+		}
+
+		for _, object := range objectResponse.Keypairs {
+			objects = append(objects, object.Keypair.Name)
+		}
+	case "flavors":
+		objectResponse := FlavorResponse{}
+		err := json.Unmarshal(objectJson, &objectResponse)
+		if err != nil {
+			return []string{}, err
+		}
+
+		for _, object := range objectResponse.Objects {
+			objects = append(objects, object.Name)
+		}
+	default:
+		log.Warningf("Uknown type request")
 	}
 
-	for _, project := range projectResponse.Projects {
-		projects = append(projects, project.Name)
-	}
-
-	return projects, nil
+	return objects, nil
 }
 
 func openstackRequest(requestUrl string, method string, data []byte, token string) (*http.Response, error) {
