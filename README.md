@@ -10,17 +10,12 @@ go build ./cmd/openstackbroker && mv openstackbroker build
 ## To containerize
 pushd build; docker build -t docker.io/jmontleon/openstackbroker:latest . && docker push docker.io/jmontleon/openstackbroker:latest; popd
 
-## To install and run in an Openshift Cluster
+## To test and make use of the broker:
 Set up devstack with HEAT and an image with which to test.
 
 A local.conf similar to this should work. Make sure port 80 and 443 are open on the VM. devstack does not appear to take care of this.
 
-```
-iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport 80 -j ACCEPT
-iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport 443 -j ACCEPT
-```
-
-
+local.conf:
 ```
 ADMIN_PASSWORD=password
 DATABASE_PASSWORD=password
@@ -33,6 +28,12 @@ IMAGE_URL_FILE="Fedora-Cloud-Base-28-1.1.x86_64.qcow2"
 IMAGE_URLS+=","$IMAGE_URL_SITE$IMAGE_URL_PATH$IMAGE_URL_FILE
 ```
 
+Iptables commands:
+```
+iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport 80 -j ACCEPT
+iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport 443 -j ACCEPT
+```
+
 Use oc cluster up to bring up a cluster with the automation broker. Something similar to below should work:
 
 ```
@@ -42,6 +43,7 @@ oc cluster up --routing-suffix=172.17.0.1.nip.io --public-hostname=172.17.0.1 --
 Add the openstack broker to your setup:
 
 ```
+oc new-project openstackbroker
 oc process -f template-openstack-broker.yaml -p OPENSTACK_URL="https://$IP-OF-DEVSTACK-VM" -p OPENSTACK_USER=admin -p OPENSTACK_PASS=password | oc create -f -
 ```
 
