@@ -156,8 +156,10 @@ func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
 		Type:      "enum",
 		Updatable: false,
 		Required:  true,
-		Default:   flavors[0],
 		Enum:      flavors,
+	}
+	if len(flavors) > 0 {
+		flavorParameter.Default = flavors[0]
 	}
 	parameters = append(parameters, flavorParameter)
 
@@ -166,9 +168,11 @@ func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
 		Title:     "Key",
 		Type:      "enum",
 		Updatable: false,
-		Required:  true,
-		Default:   keys[0],
+		Required:  false,
 		Enum:      keys,
+	}
+	if len(keys) > 0 {
+		keyParameter.Default = keys[0]
 	}
 	parameters = append(parameters, keyParameter)
 
@@ -178,8 +182,10 @@ func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
 		Type:      "enum",
 		Updatable: false,
 		Required:  true,
-		Default:   images[0],
 		Enum:      images,
+	}
+	if len(images) > 0 {
+		imageParameter.Default = images[0]
 	}
 	parameters = append(parameters, imageParameter)
 
