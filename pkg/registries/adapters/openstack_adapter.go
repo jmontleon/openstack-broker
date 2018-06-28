@@ -37,7 +37,8 @@ type OpenstackAdapter struct {
 }
 
 type Object struct {
-	Name string `json:"name"`
+	Name      string `json:"name"`
+	ProjectId string `json:"project_id,omitempty"`
 }
 
 type ProjectResponse struct {
@@ -52,12 +53,28 @@ type ImageResponse struct {
 	Objects []Object `json:"images"`
 }
 
+type NetworkResponse struct {
+	Objects []Object `json:"networks"`
+}
+
 type KeypairData struct {
 	Keypair Object `json:"keypair"`
 }
 
 type KeyResponse struct {
 	Keypairs []KeypairData `json:"keypairs"`
+}
+
+type Project struct {
+	ID string `json:"id"`
+}
+
+type Token struct {
+	Project Project `json:"project"`
+}
+
+type TokenResponse struct {
+	Token Token `json:"token"`
 }
 
 // RegistryName - Retrieve the registry name
@@ -79,7 +96,7 @@ func (r OpenstackAdapter) GetImageNames() ([]string, error) {
 		if err != nil {
 			return apbNames, err
 		}
-		projects, err = r.getObjectList(token, "projects", "/identity/v3/auth/projects")
+		projects, err = r.getObjectList(token, "projects", "/identity/v3/auth/projects", "")
 		if err != nil {
 			return apbNames, err
 		}
@@ -125,65 +142,55 @@ func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
 	project := strings.Join(splitName[2:(splitlen-2)], "-")
 	displayName := fmt.Sprintf("Openstack %v in %v project (APB)", service, project)
 
-	token, err := r.getScopedToken(project)
+	keyValue := make(map[string][]string)
+
+	token, projectId, err := r.getScopedToken(project)
 	if err != nil {
 		log.Warningf("Could not get a scoped token: %s", err)
 	}
 
-	flavors, err := r.getObjectList(token, "flavors", "/compute/v2/flavors")
+	flavors, err := r.getObjectList(token, "flavors", "/compute/v2/flavors", projectId)
 	if err != nil {
 		log.Warningf("Could not retrieve flavors: %s", err)
 	}
+	keyValue["Flavor"] = flavors
 
-	keys, err := r.getObjectList(token, "keys", "/compute/v2/os-keypairs")
+	keys, err := r.getObjectList(token, "keys", "/compute/v2/os-keypairs", projectId)
 	if err != nil {
 		log.Warningf("Could not retrieve os-keypairs: %s", err)
 	}
+	keyValue["Key"] = keys
 
-	images, err := r.getObjectList(token, "images", "/compute/v2/images")
+	images, err := r.getObjectList(token, "images", "/compute/v2/images", projectId)
 	if err != nil {
 		log.Warningf("Could not retrieve images: %s", err)
 	}
+	keyValue["Image"] = images
+
+	networks, err := r.getObjectList(token, "networks", ":9696/v2.0/networks", projectId)
+	if err != nil {
+		log.Warningf("Could not retrieve networks: %s", err)
+	}
+	keyValue["Network"] = networks
 
 	//Configure Parameters
-	flavorParameter := apb.ParameterDescriptor{
-		Name:      "flavor",
-		Title:     "Flavor",
-		Type:      "enum",
-		Updatable: false,
-		Required:  true,
-		Enum:      flavors,
+	for k, v := range keyValue {
+		parameter := apb.ParameterDescriptor{
+			Name:      strings.ToLower(k),
+			Title:     k,
+			Type:      "enum",
+			Updatable: false,
+			Required:  true,
+			Enum:      v,
+		}
+		if len(v) > 0 {
+			parameter.Default = v[0]
+		}
+		if k == "Keys" {
+			parameter.Required = false
+		}
+		parameters = append(parameters, parameter)
 	}
-	if len(flavors) > 0 {
-		flavorParameter.Default = flavors[0]
-	}
-	parameters = append(parameters, flavorParameter)
-
-	keyParameter := apb.ParameterDescriptor{
-		Name:      "key",
-		Title:     "Key",
-		Type:      "enum",
-		Updatable: false,
-		Required:  false,
-		Enum:      keys,
-	}
-	if len(keys) > 0 {
-		keyParameter.Default = keys[0]
-	}
-	parameters = append(parameters, keyParameter)
-
-	imageParameter := apb.ParameterDescriptor{
-		Name:      "image",
-		Title:     "Image",
-		Type:      "enum",
-		Updatable: false,
-		Required:  true,
-		Enum:      images,
-	}
-	if len(images) > 0 {
-		imageParameter.Default = images[0]
-	}
-	parameters = append(parameters, imageParameter)
 
 	urlParameter := apb.ParameterDescriptor{
 		Name:         "url",
@@ -279,7 +286,7 @@ func (r OpenstackAdapter) getUnscopedToken() (string, error) {
 	return response.Header["X-Subject-Token"][0], nil
 }
 
-func (r OpenstackAdapter) getScopedToken(project string) (string, error) {
+func (r OpenstackAdapter) getScopedToken(project string) (string, string, error) {
 	authString := fmt.Sprintf("{ \"auth\": { \"identity\": { \"methods\": [\"password\"], \"password\": { \"user\": { \"name\": \"%v\", \"domain\": { \"id\": \"default\" }, \"password\": \"%v\" }}}, \"scope\": { \"project\": { \"name\": \"%v\",\"domain\": { \"id\": \"default\" }}}}}", r.Config.User, r.Config.Pass, project)
 	authBytes := []byte(authString)
 
@@ -288,17 +295,32 @@ func (r OpenstackAdapter) getScopedToken(project string) (string, error) {
 
 	response, err := openstackRequest(authUrl, "POST", authBytes, "")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer response.Body.Close()
 
-	return response.Header["X-Subject-Token"][0], nil
+	objectJson, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return "", "", err
+	}
+
+	objectResponse := TokenResponse{}
+	err = json.Unmarshal(objectJson, &objectResponse)
+	if err != nil {
+		return "", "", err
+	}
+
+	return response.Header["X-Subject-Token"][0], objectResponse.Token.Project.ID, nil
 }
 
-func (r OpenstackAdapter) getObjectList(token string, objectType string, objectPath string) ([]string, error) {
+func (r OpenstackAdapter) getObjectList(token string, objectType string, objectPath string, projectId string) ([]string, error) {
 	var objects []string
 
 	objectUrl := fmt.Sprintf("%v%v", r.Config.URL.String(), objectPath)
+	if objectType == "networks" {
+		objectUrl = strings.Replace(objectUrl, "https://", "http://", 1)
+	}
+
 	response, err := openstackRequest(objectUrl, "GET", nil, token)
 	if err != nil {
 		return []string{}, err
@@ -342,6 +364,21 @@ func (r OpenstackAdapter) getObjectList(token string, objectType string, objectP
 		if err != nil {
 			return []string{}, err
 		}
+		objectArray = objectResponse.Objects
+	case "networks":
+		objectResponse := NetworkResponse{}
+		err := json.Unmarshal(objectJson, &objectResponse)
+		if err != nil {
+			return []string{}, err
+		}
+		n := 0
+		for _, object := range objectResponse.Objects {
+			if object.ProjectId == projectId {
+				objectResponse.Objects[n] = object
+				n++
+			}
+		}
+		objectResponse.Objects = objectResponse.Objects[:n]
 		objectArray = objectResponse.Objects
 	default:
 		log.Warningf("Uknown type request")
