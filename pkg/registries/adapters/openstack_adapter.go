@@ -52,12 +52,8 @@ type ImageResponse struct {
 	Objects []Object `json:"images"`
 }
 
-type Keypair struct {
-	Name string `json:"name"`
-}
-
 type KeypairData struct {
-	Keypair Keypair `json:"keypair"`
+	Keypair Object `json:"keypair"`
 }
 
 type KeyResponse struct {
@@ -313,6 +309,7 @@ func (r OpenstackAdapter) getObjectList(token string, objectType string, objectP
 		return []string{}, err
 	}
 
+	var objectArray []Object
 	switch objectType {
 	case "projects":
 		objectResponse := ProjectResponse{}
@@ -320,42 +317,38 @@ func (r OpenstackAdapter) getObjectList(token string, objectType string, objectP
 		if err != nil {
 			return []string{}, err
 		}
-
-		for _, object := range objectResponse.Objects {
-			objects = append(objects, object.Name)
-		}
+		objectArray = objectResponse.Objects
 	case "images":
 		objectResponse := ImageResponse{}
 		err := json.Unmarshal(objectJson, &objectResponse)
 		if err != nil {
 			return []string{}, err
 		}
-
-		for _, object := range objectResponse.Objects {
-			objects = append(objects, object.Name)
-		}
+		objectArray = objectResponse.Objects
 	case "keys":
 		objectResponse := KeyResponse{}
 		err := json.Unmarshal(objectJson, &objectResponse)
 		if err != nil {
 			return []string{}, err
 		}
-
-		for _, object := range objectResponse.Keypairs {
-			objects = append(objects, object.Keypair.Name)
+		var objectList []Object
+		for _, keypair := range objectResponse.Keypairs {
+			objectList = append(objectList, keypair.Keypair)
 		}
+		objectArray = objectList
 	case "flavors":
 		objectResponse := FlavorResponse{}
 		err := json.Unmarshal(objectJson, &objectResponse)
 		if err != nil {
 			return []string{}, err
 		}
-
-		for _, object := range objectResponse.Objects {
-			objects = append(objects, object.Name)
-		}
+		objectArray = objectResponse.Objects
 	default:
 		log.Warningf("Uknown type request")
+	}
+
+	for _, object := range objectArray {
+		objects = append(objects, object.Name)
 	}
 
 	return objects, nil
