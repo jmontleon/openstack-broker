@@ -186,67 +186,34 @@ func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
 		if len(v) > 0 {
 			parameter.Default = v[0]
 		}
-		if k == "Keys" {
+		if k == "Key" {
 			parameter.Required = false
 		}
 		parameters = append(parameters, parameter)
 	}
 
-	urlParameter := apb.ParameterDescriptor{
-		Name:         "url",
-		Title:        "URL",
-		Type:         "string",
-		Updatable:    false,
-		Required:     true,
-		Default:      fmt.Sprintf("%v/identity", r.Config.URL.String()),
-		DisplayGroup: "Openstack Authentication",
+	authParameters := [5]map[string]string{
+		{"name": "url", "title": "URL", "default": fmt.Sprintf("%v/identity", r.Config.URL.String()), "type": "string", "displaytype": ""},
+		{"name": "user", "title": "User", "default": r.Config.User, "type": "string", "displaytype": ""},
+		{"name": "pass", "title": "Password", "default": r.Config.Pass, "type": "string", "displaytype": "password"},
+		{"name": "project", "title": "Project", "default": project, "type": "string", "displaytype": ""},
+		{"name": "service", "title": "Service", "default": service, "type": "string", "displaytype": ""},
 	}
-	parameters = append(parameters, urlParameter)
 
-	userParameter := apb.ParameterDescriptor{
-		Name:         "user",
-		Title:        "User",
-		Type:         "string",
-		Updatable:    false,
-		Required:     true,
-		Default:      r.Config.User,
-		DisplayGroup: "Openstack Authentication",
+	for parameter := range authParameters {
+		projectParameter := apb.ParameterDescriptor{
+			Name:         parameter["name"],
+			Title:        parameter["title"],
+			Type:         parameter["type"],
+			Updatable:    false,
+			Required:     true,
+			Default:      parameter["default"],
+			DisplayType:  parameter["displaytype"],
+			DisplayGroup: "Openstack Authentication",
+		}
+		parameters = append(parameters, parameter)
 	}
-	parameters = append(parameters, userParameter)
 
-	passParameter := apb.ParameterDescriptor{
-		Name:         "pass",
-		Title:        "Password",
-		Type:         "string",
-		Updatable:    false,
-		Required:     true,
-		Default:      r.Config.Pass,
-		DisplayType:  "password",
-		DisplayGroup: "Openstack Authentication",
-	}
-	parameters = append(parameters, passParameter)
-
-	projectParameter := apb.ParameterDescriptor{
-		Name:         "project",
-		Title:        "Project",
-		Type:         "string",
-		Updatable:    false,
-		Required:     true,
-		Default:      project,
-		DisplayGroup: "Openstack Authentication",
-	}
-	parameters = append(parameters, projectParameter)
-
-	serviceParameter := apb.ParameterDescriptor{
-		Name:         "service",
-		Title:        "Service",
-		Type:         "string",
-		Updatable:    false,
-		Required:     true,
-		Default:      service,
-		DisplayGroup: "Openstack Authentication",
-	}
-	parameters = append(parameters, serviceParameter)
 	//Configure Plan
 	plan.Name = "default"
 	plan.Parameters = parameters
