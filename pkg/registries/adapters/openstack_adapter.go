@@ -41,30 +41,6 @@ type Object struct {
 	ProjectId string `json:"project_id,omitempty"`
 }
 
-type ProjectResponse struct {
-	Objects []Object `json:"projects"`
-}
-
-type FlavorResponse struct {
-	Objects []Object `json:"flavors"`
-}
-
-type ImageResponse struct {
-	Objects []Object `json:"images"`
-}
-
-type NetworkResponse struct {
-	Objects []Object `json:"networks"`
-}
-
-type KeypairData struct {
-	Keypair Object `json:"keypair"`
-}
-
-type KeyResponse struct {
-	Keypairs []KeypairData `json:"keypairs"`
-}
-
 type Project struct {
 	ID string `json:"id"`
 }
@@ -295,31 +271,31 @@ func (r OpenstackAdapter) getObjectList(token string, objectType string, objectP
 	var objectArray []Object
 	switch objectType {
 	case "keys":
-		objectResponse := KeyResponse{}
-		err := json.Unmarshal(objectJson, &objectResponse)
-		if err != nil {
-			return []string{}, err
+		objectResponse := make(map[string][]map[string]Object)
+		json.Unmarshal(objectJson, &objectResponse)
+		if len(objectResponse["keypairs"]) == 0 {
+			log.Warningf("Did not find any %v when unmarshalling response", objectType)
 		}
 		var objectList []Object
-		for _, keypair := range objectResponse.Keypairs {
-			objectList = append(objectList, keypair.Keypair)
+		for _, object := range objectResponse["keypairs"] {
+			objectList = append(objectList, object["keypair"])
 		}
 		objectArray = objectList
 	case "networks":
-		objectResponse := NetworkResponse{}
-		err := json.Unmarshal(objectJson, &objectResponse)
-		if err != nil {
-			return []string{}, err
+		objectResponse := make(map[string][]Object)
+		json.Unmarshal(objectJson, &objectResponse)
+		if len(objectResponse[objectType]) == 0 {
+			log.Warningf("Did not find any %v when unmarshalling response", objectType)
 		}
 		n := 0
-		for _, object := range objectResponse.Objects {
+		for _, object := range objectResponse[objectType] {
 			if object.ProjectId == projectId {
-				objectResponse.Objects[n] = object
+				objectResponse[objectType][n] = object
 				n++
 			}
 		}
-		objectResponse.Objects = objectResponse.Objects[:n]
-		objectArray = objectResponse.Objects
+		objectResponse[objectType] = objectResponse[objectType][:n]
+		objectArray = objectResponse[objectType]
 	default:
 		objectResponse := make(map[string][]Object)
 		json.Unmarshal(objectJson, &objectResponse)
