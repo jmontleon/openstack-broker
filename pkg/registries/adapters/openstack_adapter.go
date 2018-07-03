@@ -294,27 +294,6 @@ func (r OpenstackAdapter) getObjectList(token string, objectType string, objectP
 
 	var objectArray []Object
 	switch objectType {
-	case "projects":
-		objectResponse := ProjectResponse{}
-		err := json.Unmarshal(objectJson, &objectResponse)
-		if err != nil {
-			return []string{}, err
-		}
-		objectArray = objectResponse.Objects
-	case "images":
-		objectResponse := ImageResponse{}
-		err := json.Unmarshal(objectJson, &objectResponse)
-		if err != nil {
-			return []string{}, err
-		}
-		objectArray = objectResponse.Objects
-	case "flavors":
-		objectResponse := FlavorResponse{}
-		err := json.Unmarshal(objectJson, &objectResponse)
-		if err != nil {
-			return []string{}, err
-		}
-		objectArray = objectResponse.Objects
 	case "keys":
 		objectResponse := KeyResponse{}
 		err := json.Unmarshal(objectJson, &objectResponse)
@@ -342,7 +321,12 @@ func (r OpenstackAdapter) getObjectList(token string, objectType string, objectP
 		objectResponse.Objects = objectResponse.Objects[:n]
 		objectArray = objectResponse.Objects
 	default:
-		log.Warningf("Uknown type request")
+		objectResponse := make(map[string][]Object)
+		json.Unmarshal(objectJson, &objectResponse)
+		if len(objectResponse[objectType]) == 0 {
+			log.Warningf("Did not find any %v when unmarshalling response", objectType)
+		}
+		objectArray = objectResponse[objectType]
 	}
 
 	for _, object := range objectArray {
