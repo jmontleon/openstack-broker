@@ -149,29 +149,20 @@ func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
 		log.Warningf("Could not get a scoped token: %s", err)
 	}
 
-	flavors, err := r.getObjectList(token, "flavors", "/compute/v2/flavors", projectId)
-	if err != nil {
-		log.Warningf("Could not retrieve flavors: %s", err)
+	parameterTypes := [4]map[string]string{
+		{"name": "flavors", "label": "Flavor", "path": "/compute/v2/flavors"},
+		{"name": "keys", "label": "Key", "path": "/compute/v2/os-keypairs"},
+		{"name": "images", "label": "Image", "path": "/compute/v2/images"},
+		{"name": "networks", "label": "Network", "path": ":9696/v2.0/networks"},
 	}
-	keyValue["Flavor"] = flavors
 
-	keys, err := r.getObjectList(token, "keys", "/compute/v2/os-keypairs", projectId)
-	if err != nil {
-		log.Warningf("Could not retrieve os-keypairs: %s", err)
+	for _, pt := range parameterTypes {
+		items, err := r.getObjectList(token, pt["name"], pt["path"], projectId)
+		if err != nil {
+			log.Warningf("Could not retrieve %s: %s", pt["name"], err)
+		}
+		keyValue[pt["label"]] = items
 	}
-	keyValue["Key"] = keys
-
-	images, err := r.getObjectList(token, "images", "/compute/v2/images", projectId)
-	if err != nil {
-		log.Warningf("Could not retrieve images: %s", err)
-	}
-	keyValue["Image"] = images
-
-	networks, err := r.getObjectList(token, "networks", ":9696/v2.0/networks", projectId)
-	if err != nil {
-		log.Warningf("Could not retrieve networks: %s", err)
-	}
-	keyValue["Network"] = networks
 
 	//Configure Parameters
 	for k, v := range keyValue {
@@ -200,15 +191,15 @@ func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
 		{"name": "service", "title": "Service", "default": service, "type": "string", "displaytype": ""},
 	}
 
-	for parameter := range authParameters {
-		projectParameter := apb.ParameterDescriptor{
-			Name:         parameter["name"],
-			Title:        parameter["title"],
-			Type:         parameter["type"],
+	for _, authParameter := range authParameters {
+		parameter := apb.ParameterDescriptor{
+			Name:         authParameter["name"],
+			Title:        authParameter["title"],
+			Type:         authParameter["type"],
 			Updatable:    false,
 			Required:     true,
-			Default:      parameter["default"],
-			DisplayType:  parameter["displaytype"],
+			Default:      authParameter["default"],
+			DisplayType:  authParameter["displaytype"],
 			DisplayGroup: "Openstack Authentication",
 		}
 		parameters = append(parameters, parameter)
@@ -314,6 +305,13 @@ func (r OpenstackAdapter) getObjectList(token string, objectType string, objectP
 			return []string{}, err
 		}
 		objectArray = objectResponse.Objects
+	case "flavors":
+		objectResponse := FlavorResponse{}
+		err := json.Unmarshal(objectJson, &objectResponse)
+		if err != nil {
+			return []string{}, err
+		}
+		objectArray = objectResponse.Objects
 	case "keys":
 		objectResponse := KeyResponse{}
 		err := json.Unmarshal(objectJson, &objectResponse)
@@ -325,13 +323,6 @@ func (r OpenstackAdapter) getObjectList(token string, objectType string, objectP
 			objectList = append(objectList, keypair.Keypair)
 		}
 		objectArray = objectList
-	case "flavors":
-		objectResponse := FlavorResponse{}
-		err := json.Unmarshal(objectJson, &objectResponse)
-		if err != nil {
-			return []string{}, err
-		}
-		objectArray = objectResponse.Objects
 	case "networks":
 		objectResponse := NetworkResponse{}
 		err := json.Unmarshal(objectJson, &objectResponse)
