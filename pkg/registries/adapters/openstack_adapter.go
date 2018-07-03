@@ -77,6 +77,9 @@ type TokenResponse struct {
 	Token Token `json:"token"`
 }
 
+const unscopedAuthString = "{ \"auth\": { \"identity\": { \"methods\": [\"password\"], \"password\": { \"user\": { \"name\": \"%v\", \"domain\": { \"id\": \"default\" }, \"password\": \"%v\" }}}}}"
+const scopedAuthString = "{ \"auth\": { \"identity\": { \"methods\": [\"password\"], \"password\": { \"user\": { \"name\": \"%v\", \"domain\": { \"id\": \"default\" }, \"password\": \"%v\" }}}, \"scope\": { \"project\": { \"name\": \"%v\",\"domain\": { \"id\": \"default\" }}}}}"
+
 // RegistryName - Retrieve the registry name
 func (r OpenstackAdapter) RegistryName() string {
 	if r.Config.URL.Host == "" {
@@ -229,7 +232,7 @@ func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
 }
 
 func (r OpenstackAdapter) getUnscopedToken() (string, error) {
-	authString := fmt.Sprintf("{ \"auth\": { \"identity\": { \"methods\": [\"password\"], \"password\": { \"user\": { \"name\": \"%v\", \"domain\": { \"id\": \"default\" }, \"password\": \"%v\" }}}}}", r.Config.User, r.Config.Pass)
+	authString := fmt.Sprintf(unscopedAuthString, r.Config.User, r.Config.Pass)
 	authBytes := []byte(authString)
 
 	authUrl := fmt.Sprintf("%v/identity/v3/auth/tokens",
@@ -245,7 +248,7 @@ func (r OpenstackAdapter) getUnscopedToken() (string, error) {
 }
 
 func (r OpenstackAdapter) getScopedToken(project string) (string, string, error) {
-	authString := fmt.Sprintf("{ \"auth\": { \"identity\": { \"methods\": [\"password\"], \"password\": { \"user\": { \"name\": \"%v\", \"domain\": { \"id\": \"default\" }, \"password\": \"%v\" }}}, \"scope\": { \"project\": { \"name\": \"%v\",\"domain\": { \"id\": \"default\" }}}}}", r.Config.User, r.Config.Pass, project)
+	authString := fmt.Sprintf(scopedAuthString, r.Config.User, r.Config.Pass, project)
 	authBytes := []byte(authString)
 
 	authUrl := fmt.Sprintf("%v/identity/v3/auth/tokens",
