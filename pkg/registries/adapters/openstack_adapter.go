@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/automationbroker/bundle-lib/apb"
@@ -56,6 +57,18 @@ type TokenResponse struct {
 const unscopedAuthString = "{ \"auth\": { \"identity\": { \"methods\": [\"password\"], \"password\": { \"user\": { \"name\": \"%v\", \"domain\": { \"id\": \"default\" }, \"password\": \"%v\" }}}}}"
 const scopedAuthString = "{ \"auth\": { \"identity\": { \"methods\": [\"password\"], \"password\": { \"user\": { \"name\": \"%v\", \"domain\": { \"id\": \"default\" }, \"password\": \"%v\" }}}, \"scope\": { \"project\": { \"name\": \"%v\",\"domain\": { \"id\": \"default\" }}}}}"
 
+var services = []string{"vm"}
+
+var parameterTypes = map[string][]map[string]string{
+	"vm": {
+		{"name": "flavors", "label": "Flavor", "path": "/compute/v2/flavors", "required": "true"},
+		{"name": "keys", "label": "Key", "path": "/compute/v2/os-keypairs", "required": "false"},
+		{"name": "images", "label": "Image", "path": "/compute/v2/images", "required": "true"},
+		{"name": "networks", "label": "Network", "path": ":9696/v2.0/networks", "required": "true"},
+		{"name": "security_groups", "label": "Security Group", "path": "/compute/v2/os-security-groups", "required": "false"},
+	},
+}
+
 // RegistryName - Retrieve the registry name
 func (r OpenstackAdapter) RegistryName() string {
 	if r.Config.URL.Host == "" {
@@ -68,7 +81,6 @@ func (r OpenstackAdapter) RegistryName() string {
 func (r OpenstackAdapter) GetImageNames() ([]string, error) {
 	var apbNames []string
 	var projects []string
-	services := []string{"vm"}
 
 	if len(r.Config.Org) == 0 {
 		token, err := r.getUnscopedToken()
@@ -121,46 +133,35 @@ func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
 	project := strings.Join(splitName[2:(splitlen-2)], "-")
 	displayName := fmt.Sprintf("Openstack %v in %v project (APB)", service, project)
 
-	keyValue := make(map[string][]string)
-
 	token, projectId, err := r.getScopedToken(project)
 	if err != nil {
 		log.Warningf("Could not get a scoped token: %s", err)
 	}
 
-	parameterTypes := [5]map[string]string{
-		{"name": "flavors", "label": "Flavor", "path": "/compute/v2/flavors"},
-		{"name": "keys", "label": "Key", "path": "/compute/v2/os-keypairs"},
-		{"name": "images", "label": "Image", "path": "/compute/v2/images"},
-		{"name": "networks", "label": "Network", "path": ":9696/v2.0/networks"},
-		{"name": "security_groups", "label": "Security Group", "path": "/compute/v2/os-security-groups"},
-	}
-
-	for _, pt := range parameterTypes {
-		items, err := r.getObjectList(token, pt["name"], pt["path"], projectId)
+	//Configure Parameters
+	for _, pt := range parameterTypes[service] {
+		values, err := r.getObjectList(token, pt["name"], pt["path"], projectId)
 		if err != nil {
 			log.Warningf("Could not retrieve %s: %s", pt["name"], err)
 		}
-		keyValue[pt["label"]] = items
-	}
+		required, err := strconv.ParseBool(pt["required"])
+		if err != nil {
+			required = false
+		}
 
-	//Configure Parameters
-	for k, v := range keyValue {
 		parameter := apb.ParameterDescriptor{
-			Name:      strings.Replace(strings.ToLower(k), " ", "_", -1),
-			Title:     k,
+			Name:      strings.Replace(strings.ToLower(pt["label"]), " ", "_", -1),
+			Title:     pt["label"],
 			Type:      "enum",
 			Updatable: false,
-			Required:  true,
-			Enum:      v,
+			Enum:      values,
+			Required:  required,
 		}
-		if len(v) > 0 {
-			parameter.Default = v[0]
-		}
-		if k == "Key" {
-			parameter.Required = false
+		if len(values) > 0 {
+			parameter.Default = values[0]
 		}
 		parameters = append(parameters, parameter)
+
 	}
 
 	authParameters := [5]map[string]string{
