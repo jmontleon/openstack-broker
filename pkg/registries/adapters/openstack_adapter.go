@@ -128,11 +128,12 @@ func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
 		log.Warningf("Could not get a scoped token: %s", err)
 	}
 
-	parameterTypes := [4]map[string]string{
+	parameterTypes := [5]map[string]string{
 		{"name": "flavors", "label": "Flavor", "path": "/compute/v2/flavors"},
 		{"name": "keys", "label": "Key", "path": "/compute/v2/os-keypairs"},
 		{"name": "images", "label": "Image", "path": "/compute/v2/images"},
 		{"name": "networks", "label": "Network", "path": ":9696/v2.0/networks"},
+		{"name": "security_groups", "label": "Security Group", "path": "/compute/v2/os-security-groups"},
 	}
 
 	for _, pt := range parameterTypes {
@@ -146,7 +147,7 @@ func (r OpenstackAdapter) loadSpec(imageName string) (*apb.Spec, error) {
 	//Configure Parameters
 	for k, v := range keyValue {
 		parameter := apb.ParameterDescriptor{
-			Name:      strings.ToLower(k),
+			Name:      strings.Replace(strings.ToLower(k), " ", "_", -1),
 			Title:     k,
 			Type:      "enum",
 			Updatable: false,
